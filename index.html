@@ -176,7 +176,7 @@ var CONFIG = {
   function lineLogin() {
     $('loadingText').textContent = '正在登入…';
     show('vLoading');
-    return api('auth.lineLogin', { idToken: idToken }).then(must).then(function (d) {
+    return apiRetry('auth.lineLogin', { idToken: idToken }, 3).then(must).then(function (d) {
       retried('clear'); // 這張身分 LINE 認得，下次過期還可以再自動重拿
       if (d.needBind) {
         $('lineName').textContent = d.lineName ? '（LINE：' + d.lineName + '）' : '';
@@ -196,8 +196,8 @@ var CONFIG = {
     msg.textContent = '';
     btn.disabled = true;
     var step = ticket
-      ? api('auth.verifyCode', { ticket: ticket, code: $('code').value.trim(), device: 'LINE' })
-      : api('auth.login', { companyCode: $('company').value.trim(), empNo: $('empno').value.trim(), password: $('pwd').value, device: 'LINE' });
+      ? apiRetry('auth.verifyCode', { ticket: ticket, code: $('code').value.trim(), device: 'LINE' }, 3)
+      : apiRetry('auth.login', { companyCode: $('company').value.trim(), empNo: $('empno').value.trim(), password: $('pwd').value, device: 'LINE' }, 3);
     step.then(must).then(function (d) {
       if (d.needCode) {
         ticket = d.ticket;
@@ -209,7 +209,7 @@ var CONFIG = {
       if (d.user.mustChangePwd) throw new Error('這是臨時密碼：請先按下面「打開完整的德芳人資系統」改成自己的密碼，再回來綁定');
       token = d.token;
       try { localStorage.setItem('df_company', $('company').value.trim()); } catch (x) { /* 同上 */ }
-      return api('auth.lineBind', { idToken: idToken }).then(must).then(function () {
+      return apiRetry('auth.lineBind', { idToken: idToken }, 3).then(must).then(function () {
         token = '';
         ticket = '';
         return lineLogin();
