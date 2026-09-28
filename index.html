@@ -42,7 +42,7 @@
     <h2>第一次使用：綁定員工帳號</h2>
     <p class="muted">輸入平常登入德芳人資的資料。綁定後在 LINE 打開就不用再輸入密碼。<span id="lineName"></span></p>
     <form id="bindForm" autocomplete="on" novalidate>
-      <label for="company">公司代碼</label><input id="company" autocomplete="organization">
+      <div id="companyBox"><label for="company">公司代碼</label><input id="company" autocomplete="organization"></div>
       <label for="empno">員工編號</label><input id="empno" autocomplete="username">
       <label for="pwd">密碼</label><input id="pwd" type="password" autocomplete="current-password">
       <div id="codeBox" hidden>
@@ -80,6 +80,7 @@
  * 本機測試：雙擊這個檔案（file://）會改用 ../app/local 的假資料庫和假的 LINE 身分；網址加 #dev=代號 可以換一個 LINE 使用者
  */
 var CONFIG = {
+  COMPANY_CODE: 'defang', // 只有一間公司：員工不用自己打公司代碼（留空就會顯示這一格讓員工填）
   LIFF_ID: '2011602394-RSJHslZ1', // LINE Developers → LINE Login channel → LIFF 分頁的 LIFF ID（不是密碼）
   API_URL: 'https://script.google.com/macros/s/AKfycbyKQYKbz8u7-ZEAV8g_bdZoFFTlXZtbBLGDoNskmtUUa8Dxe-mOqkdvOAFQPxEKHiVw/exec' // 系統正式網址
 };
@@ -162,7 +163,8 @@ var CONFIG = {
     return api('auth.lineLogin', { idToken: idToken }).then(must).then(function (d) {
       if (d.needBind) {
         $('lineName').textContent = d.lineName ? '（LINE：' + d.lineName + '）' : '';
-        try { $('company').value = $('company').value || localStorage.getItem('df_company') || ''; } catch (e) { /* 不能存就算了 */ }
+        $('companyBox').hidden = !!CONFIG.COMPANY_CODE;
+        try { $('company').value = CONFIG.COMPANY_CODE || $('company').value || localStorage.getItem('df_company') || ''; } catch (e) { $('company').value = CONFIG.COMPANY_CODE || ''; }
         show('vBind');
         return;
       }
