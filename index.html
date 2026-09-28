@@ -92,6 +92,14 @@ var CONFIG = {
   function $(id) { return document.getElementById(id); }
   function show(view) { ['vLoading', 'vBind', 'vPunch', 'vError'].forEach(function (v) { $(v).hidden = v !== view; }); }
   function fail(text) { $('errorText').textContent = text; show('vError'); }
+  /* LINE 身分過期（外部瀏覽器會留著舊的）只自動重拿一次，避免一直轉圈 */
+  function retried(set) {
+    try {
+      if (set === 'clear') { sessionStorage.removeItem('df_line_retry'); return false; }
+      if (set) sessionStorage.setItem('df_line_retry', '1');
+      return sessionStorage.getItem('df_line_retry') === '1';
+    } catch (e) { return !!set; }
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function pad(n) { return ('0' + n).slice(-2); }
 
@@ -154,13 +162,22 @@ var CONFIG = {
       idToken = liff.getIDToken();
       if (!idToken) throw new Error('拿不到 LINE 身分：請確認 LIFF 有勾選 openid 權限');
       return lineLogin();
-    }).catch(function (e) { fail(e.message); });
+    }).catch(function (e) {
+      if (e && e.code === 'AUTH' && !DEV && !retried() && typeof liff !== 'undefined') {
+        retried(true); // 舊身分可能過期了：登出再登入一次，拿一張新的
+        try { liff.logout(); } catch (x) { /* 本來就沒登入 */ }
+        liff.login();
+        return;
+      }
+      fail(e.message);
+    });
   }
 
   function lineLogin() {
     $('loadingText').textContent = '正在登入…';
     show('vLoading');
     return api('auth.lineLogin', { idToken: idToken }).then(must).then(function (d) {
+      retried('clear'); // 這張身分 LINE 認得，下次過期還可以再自動重拿
       if (d.needBind) {
         $('lineName').textContent = d.lineName ? '（LINE：' + d.lineName + '）' : '';
         $('companyBox').hidden = !!CONFIG.COMPANY_CODE;
