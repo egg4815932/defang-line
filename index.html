@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow"><!-- 放在公開的 GitHub Pages，但不要被搜尋引擎收錄 -->
+<title>德芳人資｜LINE 打卡</title>
+<style>
+  :root { --brand: #00A7F2; --brand2: #0B7BC0; --ok: #1F9D55; --no: #D93A3F; --ink: #1F2933; --muted: #6B7785; --bg: #F3F6F9; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--brand); color: #fff; padding: 14px 16px; font-size: 18px; font-weight: 700; }
+  main { padding: 16px; max-width: 480px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+  h2 { margin: 0 0 6px; font-size: 18px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .ok { color: var(--ok); } .no { color: var(--no); }
+  .clock { text-align: center; }
+  .clock .t { font-size: 44px; font-weight: 700; letter-spacing: 1px; margin: 4px 0; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+  button { font: inherit; border: 0; border-radius: 10px; padding: 16px 12px; font-size: 20px; font-weight: 700; color: #fff; background: var(--brand); cursor: pointer; }
+  button.out { background: var(--brand2); }
+  button.sec { background: #E4E9EE; color: var(--ink); font-size: 15px; font-weight: 500; padding: 12px; width: 100%; }
+  button.wide { width: 100%; margin-top: 14px; font-size: 17px; padding: 13px; }
+  button:disabled { opacity: .5; }
+  label { display: block; font-size: 14px; margin: 12px 0 4px; }
+  input { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; border: 1px solid #CBD3DB; border-radius: 8px; background: #fff; }
+  .msg { margin-top: 12px; font-weight: 600; min-height: 1.4em; word-break: break-word; }
+  ul { padding-left: 18px; margin: 6px 0 0; }
+  li { margin: 4px 0; }
+  [hidden] { display: none !important; }
+</style>
+<!-- LINE 官方的 LIFF 元件（本機測試時會被假的取代） -->
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+<header>德芳人資｜LINE 打卡</header>
+<main>
+  <div class="card" id="vLoading"><p id="loadingText">正在確認 LINE 身分…</p></div>
+
+  <div class="card" id="vBind" hidden>
+    <h2>第一次使用：綁定員工帳號</h2>
+    <p class="muted">輸入平常登入德芳人資的資料。綁定後在 LINE 打開就不用再輸入密碼。<span id="lineName"></span></p>
+    <form id="bindForm" autocomplete="on" novalidate>
+      <label for="company">公司代碼</label><input id="company" autocomplete="organization">
+      <label for="empno">員工編號</label><input id="empno" autocomplete="username">
+      <label for="pwd">密碼</label><input id="pwd" type="password" autocomplete="current-password">
+      <div id="codeBox" hidden>
+        <label for="code">Email 驗證碼</label><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+        <p class="muted" id="codeHint"></p>
+      </div>
+      <button type="submit" class="wide" id="bindBtn">綁定並登入</button>
+    </form>
+    <div class="msg no" id="bindMsg" role="alert"></div>
+  </div>
+
+  <div id="vPunch" hidden>
+    <div class="card clock">
+      <div class="muted" id="who"></div>
+      <div class="t" id="now">--:--:--</div>
+      <div class="muted" id="today"></div>
+      <div class="btns"><button type="button" data-kind="上班">上班</button><button type="button" class="out" data-kind="下班">下班</button></div>
+      <div class="msg" id="punchMsg" role="status"></div>
+    </div>
+    <div class="card">
+      <b>今天班表</b><div class="muted" id="sched">-</div>
+      <b style="display:block;margin-top:10px">今天打卡</b><ul id="log"><li class="muted">還沒打卡</li></ul>
+    </div>
+    <div class="card"><button type="button" class="sec" id="openSystem">打開完整的德芳人資系統</button></div>
+  </div>
+
+  <div class="card" id="vError" hidden><p class="msg no" id="errorText"></p><button type="button" class="sec" id="retry">重新試一次</button></div>
+</main>
+
+<script>
+/* 德芳人資 LINE 打卡小網頁：放在 GitHub Pages，LINE 圖文選單連到 https://liff.line.me/<LIFF ID>
+ * 流程：LIFF 拿到 LINE 的 ID token → 系統 auth.lineLogin 向 LINE 確認身分
+ *   已綁定 → 直接登入 → 打卡（照樣檢查 GPS）
+ *   沒綁定 → 輸入公司代碼、員工編號、密碼（公司有開兩步驟驗證再輸入 Email 驗證碼）→ auth.lineBind
+ * 本機測試：雙擊這個檔案（file://）會改用 ../app/local 的假資料庫和假的 LINE 身分；網址加 #dev=代號 可以換一個 LINE 使用者
+ */
+var CONFIG = {
+  LIFF_ID: '2011602394-RSJHslZ1', // LINE Developers → LINE Login channel → LIFF 分頁的 LIFF ID（不是密碼）
+  API_URL: 'https://script.google.com/macros/s/AKfycbyKQYKbz8u7-ZEAV8g_bdZoFFTlXZtbBLGDoNskmtUUa8Dxe-mOqkdvOAFQPxEKHiVw/exec' // 系統正式網址
+};
+
+(function () {
+  var DEV = location.protocol === 'file:';
+  var WEEK = '日一二三四五六';
+  var token = '', idToken = '', ticket = '', needIp = false, clockTimer = null;
+  function $(id) { return document.getElementById(id); }
+  function show(view) { ['vLoading', 'vBind', 'vPunch', 'vError'].forEach(function (v) { $(v).hidden = v !== view; }); }
+  function fail(text) { $('errorText').textContent = text; show('vError'); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function pad(n) { return ('0' + n).slice(-2); }
+
+  /* 呼叫系統：上線用 POST 到 GAS 網址（text/plain 不會觸發跨網域預檢）；本機直接呼叫假資料庫 */
+  function api(method, params) {
+    if (DEV) {
+      return new Promise(function (resolve) { setTimeout(function () { resolve(Api.handle(method, JSON.parse(JSON.stringify(params || {})), token)); }, 50); });
+    }
+    return fetch(CONFIG.API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ method: method, params: params || {}, token: token }) })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, code: 'NETWORK', error: '連線失敗，請檢查網路後再試' }; });
+  }
+  /* 網路不穩、系統忙碌：隨機等一下再試（大家不會同時擠進去） */
+  function apiRetry(method, params, retries) {
+    return api(method, params).then(function (res) {
+      if (res && !res.ok && (res.code === 'NETWORK' || res.code === 'BUSY') && retries > 0) {
+        return new Promise(function (r) { setTimeout(r, 800 + Math.random() * 1700); }).then(function () { return apiRetry(method, params, retries - 1); });
+      }
+      return res;
+    });
+  }
+  function must(res) {
+    if (res && res.ok) return res.data;
+    var e = new Error(res ? res.error : '系統發生錯誤');
+    e.code = res && res.code;
+    throw e;
+  }
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('載入失敗：' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  /* 本機測試：假資料庫（跟 app/index.html 共用）＋假的 LINE 身分 */
+  function devSetup() {
+    return loadScript('../app/local/server-bundle.js').then(function () { return loadScript('../app/local/LocalBackend.js'); }).then(function () {
+      var m = /dev=([\w-]+)/.exec(location.hash), sub = 'Udev-' + (m ? m[1] : 'test');
+      if (!Settings.get('LINE_CHANNEL_ID')) Settings.set('LINE_CHANNEL_ID', 'dev-channel');
+      LineLogin.setVerifier(function (t) { return t === 'dev:' + sub ? { sub: sub, name: '本機測試 LINE' } : null; });
+      window.liff = {
+        init: function () { return Promise.resolve(); }, isLoggedIn: function () { return true; }, login: function () {},
+        getIDToken: function () { return 'dev:' + sub; }
+      };
+    });
+  }
+
+  function start() {
+    show('vLoading');
+    $('loadingText').textContent = '正在確認 LINE 身分…';
+    if (!DEV && !CONFIG.LIFF_ID) return fail('這個打卡網頁還沒設定 LIFF ID，請洽系統管理員');
+    (DEV ? devSetup() : Promise.resolve()).then(function () {
+      if (typeof liff === 'undefined') throw new Error('LINE 元件載入失敗，請確認網路後重新打開');
+      return liff.init({ liffId: CONFIG.LIFF_ID });
+    }).then(function () {
+      if (!liff.isLoggedIn()) { liff.login(); return new Promise(function () {}); } // 在一般瀏覽器打開：先登入 LINE，回來會重新載入
+      idToken = liff.getIDToken();
+      if (!idToken) throw new Error('拿不到 LINE 身分：請確認 LIFF 有勾選 openid 權限');
+      return lineLogin();
+    }).catch(function (e) { fail(e.message); });
+  }
+
+  function lineLogin() {
+    $('loadingText').textContent = '正在登入…';
+    show('vLoading');
+    return api('auth.lineLogin', { idToken: idToken }).then(must).then(function (d) {
+      if (d.needBind) {
+        $('lineName').textContent = d.lineName ? '（LINE：' + d.lineName + '）' : '';
+        try { $('company').value = $('company').value || localStorage.getItem('df_company') || ''; } catch (e) { /* 不能存就算了 */ }
+        show('vBind');
+        return;
+      }
+      token = d.token;
+      startPunch(d.user);
+    });
+  }
+
+  $('bindForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = $('bindBtn'), msg = $('bindMsg');
+    msg.textContent = '';
+    btn.disabled = true;
+    var step = ticket
+      ? api('auth.verifyCode', { ticket: ticket, code: $('code').value.trim(), device: 'LINE' })
+      : api('auth.login', { companyCode: $('company').value.trim(), empNo: $('empno').value.trim(), password: $('pwd').value, device: 'LINE' });
+    step.then(must).then(function (d) {
+      if (d.needCode) {
+        ticket = d.ticket;
+        $('codeBox').hidden = false;
+        $('codeHint').textContent = '驗證碼已寄到 ' + d.email + (d.devCode ? '（本機測試版不寄信：' + d.devCode + '）' : '') + '，10 分鐘內有效。';
+        $('code').focus();
+        return;
+      }
+      if (d.user.mustChangePwd) throw new Error('這是臨時密碼：請先按下面「打開完整的德芳人資系統」改成自己的密碼，再回來綁定');
+      token = d.token;
+      try { localStorage.setItem('df_company', $('company').value.trim()); } catch (x) { /* 同上 */ }
+      return api('auth.lineBind', { idToken: idToken }).then(must).then(function () {
+        token = '';
+        ticket = '';
+        return lineLogin();
+      });
+    }).catch(function (x) {
+      msg.textContent = x.message;
+      if (/驗證已失效|錯太多次|已過期/.test(x.message)) { ticket = ''; $('codeBox').hidden = true; }
+    }).then(function () { btn.disabled = false; });
+  });
+
+  function tick() {
+    var d = new Date();
+    $('now').textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    $('today').textContent = d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + '（' + WEEK[d.getDay()] + '）';
+  }
+  function startPunch(user) {
+    $('who').textContent = user.empNo + ' ' + user.name + (user.deptName ? '｜' + user.deptName : '');
+    show('vPunch');
+    tick();
+    if (!clockTimer) clockTimer = setInterval(tick, 1000);
+    loadToday();
+  }
+  function loadToday() {
+    return api('punch.today', {}).then(must).then(function (t) {
+      needIp = !!t.needIp;
+      var s = t.schedule; // 打卡規則的名稱本身就有時間（例如「標準班 09:00-18:00」）就不再重複
+      $('sched').textContent = s ? (s.name.indexOf(s.start) >= 0 ? s.name : s.name + ' ' + s.start + '~' + s.end) : '今天休息';
+      $('log').innerHTML = t.punches.length ? t.punches.map(function (p) {
+        var good = p.result === '成功';
+        return '<li>' + esc(p.kind) + ' ' + esc(String(p.time).slice(11, 16)) + ' <span class="' + (good ? 'ok' : 'no') + '">' + esc(good ? '成功' : '失敗：' + (p.failReason || '')) + '</span></li>';
+      }).join('') : '<li class="muted">還沒打卡</li>';
+    }).catch(function (e) { $('sched').textContent = e.message; });
+  }
+
+  function geo() {
+    return new Promise(function (resolve) {
+      if (!navigator.geolocation) return resolve({ error: '這支手機不支援定位' });
+      navigator.geolocation.getCurrentPosition(function (p) {
+        resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy });
+      }, function (err) {
+        resolve({ error: err.code === 1 ? '沒有允許定位權限' : '拿不到定位' });
+      }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+    });
+  }
+  /* 打卡規則要限制 IP 才去查（跟系統首頁打卡一樣） */
+  function myIp() {
+    if (!needIp) return Promise.resolve('');
+    return Promise.race([
+      fetch('https://api.ipify.org?format=json').then(function (r) { return r.json(); }).then(function (j) { return j.ip || ''; }).catch(function () { return ''; }),
+      new Promise(function (r) { setTimeout(function () { r(''); }, 4000); })
+    ]);
+  }
+
+  document.querySelector('.btns').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-kind]');
+    if (!b) return;
+    var btns = document.querySelectorAll('[data-kind]'), msg = $('punchMsg');
+    Array.prototype.forEach.call(btns, function (x) { x.disabled = true; });
+    msg.className = 'msg';
+    msg.textContent = '定位中…';
+    Promise.all([geo(), myIp()]).then(function (res) {
+      msg.textContent = '打卡中…';
+      var pos = res[0];
+      return apiRetry('punch.clock', { kind: b.getAttribute('data-kind'), lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy, gpsError: pos.error || '', ip: res[1] }, 3).then(must);
+    }).then(function (r) {
+      msg.className = 'msg ' + (r.ok ? 'ok' : 'no');
+      msg.textContent = r.message;
+      return loadToday();
+    }).catch(function (x) {
+      msg.className = 'msg no';
+      msg.textContent = x.message;
+      if (x.code === 'AUTH') setTimeout(start, 1500);
+    }).then(function () { Array.prototype.forEach.call(btns, function (x) { x.disabled = false; }); });
+  });
+
+  $('openSystem').addEventListener('click', function () {
+    if (DEV) { location.href = '../app/index.html'; return; }
+    if (typeof liff !== 'undefined' && liff.openWindow) liff.openWindow({ url: CONFIG.API_URL, external: true });
+    else location.href = CONFIG.API_URL;
+  });
+  $('retry').addEventListener('click', start);
+  start();
+})();
+</script>
+</body>
+</html>
